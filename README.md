@@ -140,6 +140,33 @@ Uncomment `tls internal` in the `Caddyfile` (self-signed cert), add an `/etc/hos
 - Backups are your responsibility — RAID/single-box redundancy is **not** backup. Point Postgres at
   offsite PITR (e.g. pgBackRest → S3) and rehearse a restore before trusting it with real data.
 
+## Troubleshooting
+
+**Reset / re-initialize (start over on a test box).** `ZITADEL_DOMAIN` and the masterkey are frozen
+at first init, so to change them — or to recover from a half-finished init — wipe Zitadel's data and
+re-run. This is a full identity reset (fresh initial admin); it keeps your TLS cert and `.env`:
+
+```sh
+docker compose down
+docker volume rm oneteam_postgres-data oneteam_zitadel-bootstrap   # drops the DB + PAT
+docker compose up -d                                              # keeps caddy-data (cert) + .env
+```
+
+**Initial admin login.** After a fresh init, sign in at `https://<domain>/ui/console` as
+`zitadel-admin@zitadel.<domain>` with password `Password1!` — then **change it immediately** (known
+default). If that doesn't work: `docker compose logs zitadel | grep -i -A2 admin`.
+
+**`zitadel-login` unhealthy / 502 on `/ui/v2/login`.** The Login V2 container waits for the
+`login-client.pat` that Zitadel writes to the shared `zitadel-bootstrap` volume on first init. Two
+things make that work and are already baked into `docker-compose.yml`: the `bootstrap-perms` init
+(makes the fresh, root-owned volume writable) and the `ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_*`
+settings (create the machine user + PAT). If you hit this after editing the compose, check
+`docker compose logs zitadel` for `permission denied` on the volume or a `03_default_instance`
+failure, then reset (above).
+
+**Domain resolves to a parking page.** See the note under [DNS](#dns-do-this-first) — delete the
+registrar's imported parking `CNAME`.
+
 ## Roadmap
 
 This is the identity foundation. Coming as separate components:
