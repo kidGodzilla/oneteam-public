@@ -48,8 +48,9 @@ On a **fresh Ubuntu 24.04** server, with a domain pointed at it and your SSH key
 sudo apt-get update && sudo apt-get install -y git
 git clone https://github.com/kidGodzilla/oneteam-public.git oneteam && cd oneteam
 
-# set your domain (edit ZITADEL_DOMAIN):
-nano .env.example
+# set your domain — edit .env (gitignored), NOT the tracked .env.example
+# (editing the tracked file makes later `git pull`s conflict):
+cp .env.example .env && nano .env        # set ZITADEL_DOMAIN
 
 sudo ./bootstrap.sh      # hardens the host + installs Docker  (reboot recommended after)
 ./install.sh             # generates secrets + brings the stack up
@@ -105,6 +106,8 @@ each group means and the constraints that bite if you get them wrong.
   - ⚠️ **Frozen at first init.** Zitadel bakes this into issuer URLs, cookies, and tokens — changing
     it later means wiping and reinitializing Zitadel. Pick the one you'll keep and double-check it
     before the first `install.sh`.
+  - Set it in **`.env`** (gitignored), *not* the tracked `.env.example` — editing the tracked file
+    makes later `git pull`s conflict. Use `cp .env.example .env` then edit `.env`.
 
 ### 2. Auto-generated — leave blank, never hand-edit or commit
 
