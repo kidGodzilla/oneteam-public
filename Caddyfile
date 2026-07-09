@@ -1,0 +1,21 @@
+# OneTeam reverse proxy.
+# Routes the Login V2 UI to the login container and everything else (API,
+# console, gRPC) to the Zitadel backend over h2c (Zitadel speaks HTTP/2 cleartext
+# internally; Caddy terminates public TLS automatically).
+
+{$ZITADEL_DOMAIN} {
+	# For LOCAL testing without a public domain/DNS, uncomment:
+	# tls internal
+
+	handle /ui/v2/login* {
+		reverse_proxy zitadel-login:3000
+	}
+
+	handle {
+		reverse_proxy zitadel:8080 {
+			transport http {
+				versions h2c 2
+			}
+		}
+	}
+}

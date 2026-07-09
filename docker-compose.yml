@@ -1,0 +1,93 @@
+# OneTeam — identity core.
+# Zitadel (identity provider) + Login V2 + Postgres + Caddy (automatic HTTPS).
+# Set ZITADEL_DOMAIN in .env to a name that resolves to this box so Caddy can issue a cert
+# (or use `tls internal` in the Caddyfile for local testing).
+
+name: oneteam
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:17}
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set in .env}
+      # consumed by initdb/00-init.sh to create per-service roles + databases
+      ZITADEL_PG_PASSWORD: ${ZITADEL_PG_PASSWORD:?set in .env}
+      PORTAL_PG_PASSWORD: ${PORTAL_PG_PASSWORD:?set in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [internal]
+
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:${ZITADEL_VERSION:-v4.15.3}
+    restart: unless-stopped
+    command: 'start-from-init --masterkey "${ZITADEL_MASTERKEY:?set in .env}" --tlsMode external'
+    environment:
+      # Connect as the pre-created `zitadel` role/db (see initdb/00-init.sh)
+      ZITADEL_DATABASE_POSTGRES_DSN: "postgres://zitadel:${ZITADEL_PG_PASSWORD}@postgres:5432/zitadel?sslmode=disable"
+      # Public endpoint — Caddy terminates TLS, so Zitadel runs plaintext internally
+      ZITADEL_EXTERNALDOMAIN: ${ZITADEL_DOMAIN:?set in .env}
+      ZITADEL_EXTERNALPORT: ${ZITADEL_EXTERNALPORT:-443}
+      ZITADEL_EXTERNALSECURE: ${ZITADEL_EXTERNALSECURE:-true}
+      ZITADEL_TLS_ENABLED: "false"
+      # Auto-provisions the Login V2 service-user PAT into the shared volume on first init
+      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  zitadel-login:
+    image: ghcr.io/zitadel/zitadel-login:${ZITADEL_VERSION:-v4.15.3}
+    restart: unless-stopped
+    environment:
+      # Login container authenticates to the Zitadel API with the PAT written above
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
+      ZITADEL_API_URL: "http://zitadel:8080"
+    volumes:
+      - zitadel-bootstrap:/zitadel/bootstrap:ro
+    depends_on:
+      zitadel:
+        condition: service_healthy
+    networks: [internal]
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      ZITADEL_DOMAIN: ${ZITADEL_DOMAIN:?set in .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      zitadel:
+        condition: service_healthy
+    networks: [internal]
+
+networks:
+  internal:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  zitadel-bootstrap:
+  caddy-data:
+  caddy-config:

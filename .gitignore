@@ -1,0 +1,7 @@
+# Never commit the generated secrets or runtime state.
+.env
+.DS_Store
+
+# Guard: an auto-loaded override would silently apply in production. Use an explicit -f overlay.
+compose.override.yml
+compose.override.yaml
