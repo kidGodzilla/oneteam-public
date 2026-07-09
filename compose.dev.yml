@@ -1,0 +1,15 @@
+# Local-dev overlay — publishes Postgres + Zitadel to the host so the admin API/web can run on the
+# host with live reload (npm run dev) and still reach them.
+#
+# EXPLICIT opt-in only. Use with:
+#   docker compose -f docker-compose.yml -f compose.dev.yml up -d
+# NEVER auto-loaded (that's why it isn't named compose.override.yml) — the production install path
+# (install.sh → plain `docker compose up`) must NOT expose these ports.
+
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432" # bind to loopback only
+  zitadel:
+    ports:
+      - "127.0.0.1:8080:8080"

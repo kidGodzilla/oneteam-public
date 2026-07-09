@@ -7,6 +7,38 @@ stack. One command on a fresh Ubuntu box brings up a hardened identity core: **Z
 > **Early preview.** This repo is the identity core — the SSO hub the rest of OneTeam builds on.
 > Mail, files, and the admin portal are separate components on the roadmap.
 
+## DNS (do this first)
+
+The identity core needs exactly **one DNS record** — a subdomain pointing at your box:
+
+| Type | Name | Value | Proxy |
+|---|---|---|---|
+| `A` | `id` (→ `id.yourcompany.com`) | your box's public IPv4 | **DNS only (grey cloud)** |
+
+On **Cloudflare**: DNS → Records → Add record → type `A`, name `id`, IPv4 = the box IP, and set the
+proxy toggle to **DNS only (grey cloud), _not_ Proxied** — proxying breaks the TLS/gRPC path (and
+can't carry mail later).
+
+It **must resolve before you run `install.sh`** — Caddy validates the domain live to obtain a
+Let's Encrypt certificate. Confirm it:
+
+```sh
+dig +short id.yourcompany.com     # should print your box's public IP
+```
+
+**Resolves to a parking page instead of your box?** (a `CNAME` to something like `*.porkbun.com`,
+`sedoparking.com`, `parkingcrew.net`…) — when you moved the domain to a new DNS host it imported the
+**registrar's parking / URL-forwarding records**. In your DNS dashboard, delete any `CNAME` pointing
+at the registrar's forwarding service — **including a wildcard `*`** — then (re-)add the `id` `A`
+record above. Those records usually have a short TTL (~60s), so it clears within minutes.
+
+Also make sure **ports 80 and 443 are open** to the internet (Caddy needs 80 for the certificate
+challenge and 443 to serve). `bootstrap.sh` doesn't need DNS — only `install.sh` does.
+
+> Email DNS (MX, SPF, DKIM, DMARC, and reverse DNS — the last set at your VPS provider, not your DNS
+> host) is a separate, larger setup that comes with the mail component. None of it is needed for the
+> identity core.
+
 ## Quickstart
 
 On a **fresh Ubuntu 24.04** server, with a domain pointed at it and your SSH key already installed
@@ -56,17 +88,44 @@ Two scripts, two jobs:
 - Ports **80** and **443** reachable from the internet.
 - ~2 GB RAM to start; more headroom is nice but not required at small scale.
 
-## Configuration
+## Configuration — setting up `.env`
 
-All configuration lives in `.env` (created from `.env.example` on first run). The essentials:
+`install.sh` copies `.env.example` → `.env` on first run and fills every blank secret with a random
+value. You only need to set **one thing by hand before running it: `ZITADEL_DOMAIN`**. Here's what
+each group means and the constraints that bite if you get them wrong.
 
-- `ZITADEL_DOMAIN` — the public hostname (must resolve to the box).
-- `ZITADEL_VERSION`, `POSTGRES_IMAGE` — pinned versions.
-- Secrets (`ZITADEL_MASTERKEY`, DB passwords) — auto-generated once; the masterkey **cannot change
-  after first init**.
+### 1. You set this (before `install.sh`)
 
-For local testing without a public domain, uncomment `tls internal` in the `Caddyfile` and use a
-hostname that resolves to the box (e.g. an `/etc/hosts` entry).
+- **`ZITADEL_DOMAIN`** — the public hostname your identity provider answers on.
+  - Use a **subdomain** (e.g. `id.yourcompany.com`), **not the bare apex** — keep the apex free for
+    a landing page and (later) your email domain.
+  - It **must resolve to this box** (an A record → the server IP) **before** you run `install.sh` —
+    Caddy validates the domain live to issue the TLS certificate. On Cloudflare, set the record to
+    **DNS-only (grey cloud), not proxied** (proxying breaks the cert/gRPC path and can't carry SMTP).
+  - ⚠️ **Frozen at first init.** Zitadel bakes this into issuer URLs, cookies, and tokens — changing
+    it later means wiping and reinitializing Zitadel. Pick the one you'll keep and double-check it
+    before the first `install.sh`.
+
+### 2. Auto-generated — leave blank, never hand-edit or commit
+
+- **`ZITADEL_MASTERKEY`, `POSTGRES_PASSWORD`, `ZITADEL_PG_PASSWORD`, `PORTAL_PG_PASSWORD`** —
+  `install.sh` fills these once with random values and leaves any existing value untouched. Don't
+  set them by hand. `.env` is gitignored — keep it that way.
+  - ⚠️ **`ZITADEL_MASTERKEY` is also frozen** — it's exactly 32 chars and encrypts data at rest.
+    Change or lose it and the encrypted data is unrecoverable. Let `install.sh` generate it, then
+    **back up your `.env`** somewhere safe.
+
+### 3. Rarely changed
+
+- **`ZITADEL_VERSION`, `POSTGRES_IMAGE`** — pinned image versions. Bump deliberately and read the
+  release notes first (Zitadel runs DB migrations on upgrade).
+- **`ZITADEL_EXTERNALPORT` / `ZITADEL_EXTERNALSECURE`** — `443` / `true` for the standard
+  Caddy-terminates-TLS setup. Leave as-is unless you specifically need otherwise.
+
+### Local testing (no public domain)
+
+Uncomment `tls internal` in the `Caddyfile` (self-signed cert), add an `/etc/hosts` entry like
+`127.0.0.1  id.oneteam.test`, and set `ZITADEL_DOMAIN=id.oneteam.test`.
 
 ## Security
 
